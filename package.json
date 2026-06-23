@@ -1,0 +1,26 @@
+{
+  "name": "cukur-burger-bot",
+  "version": "1.0.0",
+  "description": "Çukur Burger Telegram Bot",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.16.3",
+    "@supabase/supabase-js": "^2.45.4",
+    "express": "^4.21.2",
+    "dotenv": "^16.4.5",
+    "axios": "^1.7.9",
+    "form-data": "^4.0.1",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
