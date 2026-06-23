@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const { bot } = require('./bot');
 const { startNotificationService } = require('./services/notifications');
+const { initWebPush, isWebPushEnabled } = require('./services/webpush');
+const { supabase } = require('./db');
 
 const app = express();
 app.use(express.json());
@@ -9,10 +11,28 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const startedAt = Date.now();
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+// Health check — boyitilgan
+app.get('/health', async (req, res) => {
+  const health = {
+    status: 'ok',
+    time: new Date().toISOString(),
+    uptime_sec: Math.floor((Date.now() - startedAt) / 1000),
+    webhook_configured: Boolean(WEBHOOK_URL),
+    web_push: isWebPushEnabled() ? 'enabled' : 'disabled',
+    supabase: 'unknown',
+  };
+  // Supabase ulanishini yengil tekshirish
+  try {
+    const { error } = await supabase.from('site_settings').select('key').limit(1);
+    health.supabase = error ? 'error' : 'ok';
+    if (error) health.status = 'degraded';
+  } catch {
+    health.supabase = 'error';
+    health.status = 'degraded';
+  }
+  res.status(health.status === 'ok' ? 200 : 503).json(health);
 });
 
 // Telegram webhook endpoint
@@ -24,6 +44,9 @@ async function start() {
   try {
     if (!BOT_TOKEN) throw new Error('BOT_TOKEN .env da yo\'q!');
     if (!WEBHOOK_URL) throw new Error('WEBHOOK_URL .env da yo\'q!');
+
+    // Web Push ni sozlash (VAPID kalitlari bo'lsa)
+    initWebPush();
 
     // Eski webhookni o'chirish
     await bot.telegram.deleteWebhook();

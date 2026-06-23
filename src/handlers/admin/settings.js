@@ -5,7 +5,7 @@ const { getSetting, setSetting, getAllSettings } = require('../../db');
 async function showSettings(ctx) {
   const buttons = [
     [Markup.button.callback('💳 To\'lov kartasi', 'set_payment')],
-    [Markup.button.callback('🚴 Yetkazib berish narxi', 'set_delivery_fee')],
+    [Markup.button.callback('🚴 Yetkazib berish / buyurtma', 'set_delivery_fee')],
     [Markup.button.callback('📝 Sayt matnlari', 'set_texts')],
     [Markup.button.callback('📣 Promo banner', 'set_promo')],
     [Markup.button.callback('📍 Kafe ma\'lumotlari', 'set_cafe')],
@@ -44,13 +44,22 @@ async function handleCallback(ctx) {
     return ctx.editMessageText('👤 Karta egasining ism-familiyasini kiriting:\nMisol: Sardor Karimov');
   }
 
-  // ── Yetkazish narxi ──
+  // ── Yetkazish narxi / chegaralar ──
   if (data === 'set_delivery_fee') {
     const fee = await getSetting('delivery_fee') || '15000';
+    const threshold = await getSetting('free_delivery_threshold') || '150000';
+    const minOrder = await getSetting('min_order_amount') || '0';
     return ctx.editMessageText(
-      `🚴 <b>Yetkazib berish narxi</b>\n\nHozirgi narx: <b>${parseInt(fee).toLocaleString()} UZS</b>`,
+      `🚴 <b>Yetkazib berish va buyurtma sozlamalari</b>\n\n` +
+      `• Yetkazib berish narxi: <b>${parseInt(fee).toLocaleString()} UZS</b>\n` +
+      `• Bepul yetkazish chegarasi: <b>${parseInt(threshold).toLocaleString()} UZS</b>\n` +
+      `  <i>(shu summadan oshsa, yetkazish bepul)</i>\n` +
+      `• Minimal buyurtma summasi: <b>${parseInt(minOrder).toLocaleString()} UZS</b>\n` +
+      `  <i>(0 = cheklov yo'q)</i>`,
       { parse_mode: 'HTML', ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Narxni o\'zgartirish', 'set_delivery_fee_edit')],
+        [Markup.button.callback('🔄 Yetkazish narxi', 'set_delivery_fee_edit')],
+        [Markup.button.callback('🆓 Bepul yetkazish chegarasi', 'set_free_threshold_edit')],
+        [Markup.button.callback('🧾 Minimal buyurtma summasi', 'set_min_order_edit')],
         [Markup.button.callback('⬅️ Orqaga', 'set_back')],
       ])}
     );
@@ -59,6 +68,16 @@ async function handleCallback(ctx) {
   if (data === 'set_delivery_fee_edit') {
     ctx.session.awaitingSetting = 'delivery_fee';
     return ctx.editMessageText('💰 Yangi yetkazib berish narxini kiriting (UZS):\nMisol: 15000');
+  }
+
+  if (data === 'set_free_threshold_edit') {
+    ctx.session.awaitingSetting = 'free_delivery_threshold';
+    return ctx.editMessageText('🆓 Bepul yetkazish chegarasini kiriting (UZS):\nMisol: 150000\n(shu summadan oshsa yetkazish bepul)');
+  }
+
+  if (data === 'set_min_order_edit') {
+    ctx.session.awaitingSetting = 'min_order_amount';
+    return ctx.editMessageText('🧾 Minimal buyurtma summasini kiriting (UZS):\nMisol: 50000\n(0 = cheklov yo\'q)');
   }
 
   // ── Sayt matnlari ──
@@ -195,7 +214,7 @@ async function handleTextInput(ctx) {
   const value = ctx.message.text;
 
   try {
-    if (key === 'delivery_fee' || key === 'min_order_amount') {
+    if (key === 'delivery_fee' || key === 'min_order_amount' || key === 'free_delivery_threshold') {
       const num = parseInt(value.replace(/\D/g, ''));
       if (isNaN(num)) { await ctx.reply('❌ Faqat raqam kiriting.'); return true; }
       await setSetting(key, num.toString());

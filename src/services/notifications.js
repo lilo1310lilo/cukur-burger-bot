@@ -1,6 +1,7 @@
 const { supabase, getManagerIds, getOrder } = require('../db');
 const { sendOrderNotification } = require('../handlers/manager/orders');
 const { MANAGER_TIMEOUT_SEC } = require('../config');
+const { notifyOrderStatus } = require('./webpush');
 const axios = require('axios');
 
 let botInstance = null;
@@ -176,6 +177,8 @@ function startNotificationService() {
       table: 'orders',
     }, (payload) => {
       const order = payload.new;
+      // Sayt mijoziga Web Push yuborish (holat o'zgarganda)
+      notifyOrderStatus(order).catch(e => console.error('notifyOrderStatus:', e.message));
       // Buyurtma tasdiqlandi/rad etildi — timerlarni tozalash
       if (['confirmed', 'rejected', 'cancelled'].includes(order.status)) {
         cleanupOrder(order.id);

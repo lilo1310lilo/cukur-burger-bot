@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS menu_items (
   badge TEXT DEFAULT '',
   spicy_level INTEGER DEFAULT 0 CHECK (spicy_level BETWEEN 0 AND 3),
   weight TEXT DEFAULT '',
+  -- Dietik teglar (vegetarian, halal, nuts, ...). spicy avtomatik spicy_level dan olinadi.
+  dietary_tags TEXT[] DEFAULT '{}',
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -53,6 +55,8 @@ CREATE TABLE IF NOT EXISTS orders (
   cancel_reason TEXT DEFAULT '',
   cancelled_by TEXT DEFAULT '' CHECK (cancelled_by IN ('','customer','manager')),
   assigned_manager_id BIGINT DEFAULT NULL,
+  coupon_code TEXT DEFAULT '',
+  discount INTEGER NOT NULL DEFAULT 0,
   notes TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -105,6 +109,7 @@ INSERT INTO site_settings (key, value) VALUES
   ('payment_card_number', '0000 0000 0000 0000'),
   ('payment_card_owner', 'Ism Familiya'),
   ('delivery_fee', '15000'),
+  ('free_delivery_threshold', '150000'),
   ('min_order_amount', '0'),
   ('cafe_address_uz', 'Urganch sh., Manzil'),
   ('cafe_address_en', 'Urgench city, Address'),
@@ -188,10 +193,95 @@ CREATE TRIGGER orders_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- =============================================
+-- 7. KUPONLAR / CHEGIRMA KODLARI (bot orqali boshqariladi)
+-- =============================================
+CREATE TABLE IF NOT EXISTS coupons (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,                 -- promo kod (katta harfda saqlanadi, masalan: WELCOME10)
+  type TEXT NOT NULL DEFAULT 'percent' CHECK (type IN ('percent','fixed')),
+  amount INTEGER NOT NULL DEFAULT 0,         -- percent uchun 1-100, fixed uchun UZS
+  min_order_amount INTEGER NOT NULL DEFAULT 0,
+  valid_from TIMESTAMPTZ DEFAULT NOW(),
+  valid_until TIMESTAMPTZ DEFAULT NULL,      -- NULL = muddatsiz
+  usage_limit INTEGER DEFAULT NULL,          -- NULL = cheksiz
+  used_count INTEGER NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Kupon kodi katta harfda bo'lishi va indeks tez ishlashi uchun
+CREATE INDEX IF NOT EXISTS coupons_code_idx ON coupons (code);
+
+-- =============================================
+-- 8. BOT SESSION STORE (Telegraf session — restartda yo'qolmasligi uchun)
+-- =============================================
+CREATE TABLE IF NOT EXISTS bot_sessions (
+  key TEXT PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- =============================================
+-- 9. WEB PUSH OBUNALARI (sayt buyurtma holati o'zgarganda push uchun)
+-- =============================================
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  order_number INTEGER NOT NULL,             -- qaysi buyurtma uchun obuna
+  endpoint TEXT NOT NULL,
+  subscription JSONB NOT NULL,               -- to'liq PushSubscription JSON
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (order_number, endpoint)
+);
+
+CREATE INDEX IF NOT EXISTS push_subscriptions_order_idx ON push_subscriptions (order_number);
+
+-- RLS — yangi jadvallar
+ALTER TABLE coupons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bot_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Kuponlar: hammaga o'qish (sayt checkout da tekshiradi), faqat service_role yozish (bot)
+CREATE POLICY "coupons_read" ON coupons FOR SELECT USING (true);
+CREATE POLICY "coupons_write" ON coupons FOR ALL USING (auth.role() = 'service_role');
+
+-- Bot sessiyalari: faqat service_role (bot)
+CREATE POLICY "bot_sessions_all" ON bot_sessions FOR ALL USING (auth.role() = 'service_role');
+
+-- Push obunalari: sayt INSERT qiladi (anon), bot service_role bilan o'qiydi/o'chiradi
+CREATE POLICY "push_insert" ON push_subscriptions FOR INSERT WITH CHECK (true);
+CREATE POLICY "push_service_all" ON push_subscriptions FOR ALL USING (auth.role() = 'service_role');
+
+-- used_count ni xavfsiz oshirish uchun RPC (sayt anon orqali chaqiradi)
+CREATE OR REPLACE FUNCTION increment_coupon_usage(coupon_code TEXT)
+RETURNS void AS $$
+  UPDATE coupons SET used_count = used_count + 1 WHERE code = UPPER(coupon_code);
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- =============================================
+-- MIGRATSIYA (MAVJUD BAZA UCHUN — bir marta ishga tushiring)
+-- Agar baza allaqachon yaratilgan bo'lsa, faqat quyidagilarni ishga tushiring:
+-- =============================================
+-- ALTER TABLE menu_items ADD COLUMN IF NOT EXISTS dietary_tags TEXT[] DEFAULT '{}';
+-- ALTER TABLE orders ADD COLUMN IF NOT EXISTS coupon_code TEXT DEFAULT '';
+-- ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount INTEGER NOT NULL DEFAULT 0;
+-- INSERT INTO site_settings (key, value) VALUES ('free_delivery_threshold', '150000')
+--   ON CONFLICT (key) DO NOTHING;
+-- (yuqoridagi coupons / bot_sessions / push_subscriptions CREATE TABLE bloklari ham ishlaydi — IF NOT EXISTS)
+
+-- =============================================
 -- SUPABASE STORAGE (Fayl yuklash)
 -- =============================================
 -- Supabase Dashboard → Storage → "New bucket"
--- Bucket nomi: receipts
--- Public: FALSE (xavfsizlik uchun)
--- File size limit: 5MB
+--
+-- 1) Bucket nomi: receipts
+--    Public: FALSE (xavfsizlik uchun) | File size limit: 5MB
+--    (Mavjud — chek fayllari uchun)
+--
+-- 2) Bucket nomi: menu-images   ← YANGI, ishga tushiring
+--    Public: TRUE (sayt rasmlarni to'g'ridan-to'g'ri ko'rsatadi)
+--    File size limit: 5MB
+--    Allowed MIME types: image/jpeg, image/png, image/webp
+--    Sabab: Telegram file URL (api.telegram.org/file/bot<TOKEN>/...) ~1 soatda
+--           eskiradi va BOT_TOKEN ni oshkor qiladi. Shu sabab bot rasmni yuklab
+--           olib, menu-images bucketiga joylaydi va doimiy public URL saqlaydi.
 -- =============================================

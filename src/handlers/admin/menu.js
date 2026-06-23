@@ -4,6 +4,15 @@ const {
   addMenuItem, updateMenuItem, deleteMenuItem, toggleMenuItem,
   addCategory, deleteCategory,
 } = require('../../db');
+const { uploadTelegramPhotoToStorage } = require('../../utils/storage');
+const { escapeHtml } = require('../../utils/escape');
+
+// Mavjud dietik teglar (spicy avtomatik spicy_level dan kelib chiqadi — bu yerda yo'q)
+const DIETARY_TAGS = [
+  { key: 'vegetarian', label: '🌱 Vegetarian' },
+  { key: 'halal', label: '🕋 Halol' },
+  { key: 'nuts', label: '🥜 Yong\'oqli' },
+];
 
 // ─── MENYU RO'YXATINI KO'RSATISH ────────────────────
 async function showMenu(ctx) {
@@ -25,8 +34,8 @@ async function showMenu(ctx) {
     items.forEach((item, i) => {
       const status = item.is_available ? '✅' : '❌';
       const cat = catMap[item.category_id] || '—';
-      text += `${i + 1}. ${status} <b>${item.name_uz}</b>\n`;
-      text += `   💰 ${item.price.toLocaleString()} UZS | 📁 ${cat}\n\n`;
+      text += `${i + 1}. ${status} <b>${escapeHtml(item.name_uz)}</b>\n`;
+      text += `   💰 ${item.price.toLocaleString()} UZS | 📁 ${escapeHtml(cat)}\n\n`;
 
       buttons.push([
         Markup.button.callback(`✏️ ${item.name_uz.substring(0, 20)}`, `menu_edit_${item.id}`),
@@ -52,7 +61,7 @@ async function showCategories(ctx) {
 
     if (cats.length) {
       cats.forEach((c, i) => {
-        text += `${i + 1}. ${c.name_uz} / ${c.name_en} / ${c.name_ru}\n`;
+        text += `${i + 1}. ${escapeHtml(c.name_uz)} / ${escapeHtml(c.name_en)} / ${escapeHtml(c.name_ru)}\n`;
         buttons.push([Markup.button.callback(`🗑 ${c.name_uz}`, `cat_delete_${c.id}`)]);
       });
     } else {
@@ -90,6 +99,7 @@ async function handleCallback(ctx) {
       [Markup.button.callback('🏷 Badge', `menu_field_badge_${id}`)],
       [Markup.button.callback('⚖️ Og\'irligi', `menu_field_weight_${id}`)],
       [Markup.button.callback('🌶 Achchiqlik darajasi', `menu_field_spicy_${id}`)],
+      [Markup.button.callback('🥗 Dietik teglar', `menu_diet_${id}`)],
       [Markup.button.callback('❌ Bekor qilish', 'menu_cancel')],
     ];
 
@@ -99,11 +109,56 @@ async function handleCallback(ctx) {
     );
   }
 
-  // Maydon tahrirlash
+  // Dietik teglar tahrirlash — toggle ko'rinishida
+  if (data.startsWith('menu_diet_')) {
+    const id = data.slice('menu_diet_'.length);
+    const item = await getMenuItem(id);
+    if (!item) return ctx.reply('❌ Taom topilmadi.');
+    const current = Array.isArray(item.dietary_tags) ? item.dietary_tags : [];
+    const buttons = DIETARY_TAGS.map(t => [
+      Markup.button.callback(
+        `${current.includes(t.key) ? '✅' : '⬜️'} ${t.label}`,
+        `menu_diettag_${t.key}_${id}`
+      ),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Orqaga', `menu_edit_${id}`)]);
+    return ctx.editMessageText(
+      `🥗 <b>${escapeHtml(item.name_uz)}</b> — dietik teglar\n\nTeglarni yoqish/o'chirish uchun bosing:\n<i>(🌶 Achchiq filtri avtomatik achchiqlik darajasidan olinadi)</i>`,
+      { parse_mode: 'HTML', ...Markup.inlineKeyboard(buttons) }
+    );
+  }
+
+  // Dietik teg toggle: menu_diettag_<tag>_<uuid>
+  if (data.startsWith('menu_diettag_')) {
+    const rest = data.slice('menu_diettag_'.length);
+    const sep = rest.indexOf('_');
+    const tag = rest.slice(0, sep);
+    const id = rest.slice(sep + 1);
+    const item = await getMenuItem(id);
+    if (!item) return ctx.reply('❌ Taom topilmadi.');
+    const current = Array.isArray(item.dietary_tags) ? [...item.dietary_tags] : [];
+    const idx = current.indexOf(tag);
+    if (idx === -1) current.push(tag); else current.splice(idx, 1);
+    await updateMenuItem(id, { dietary_tags: current });
+    // Toggle ko'rinishini yangilash
+    const buttons = DIETARY_TAGS.map(t => [
+      Markup.button.callback(
+        `${current.includes(t.key) ? '✅' : '⬜️'} ${t.label}`,
+        `menu_diettag_${t.key}_${id}`
+      ),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Orqaga', `menu_edit_${id}`)]);
+    return ctx.editMessageReplyMarkup({ inline_keyboard: buttons });
+  }
+
+  // Maydon tahrirlash — UUID id va ko'p so'zli maydon nomlari (name_uz)
+  // ni xavfsiz ajratamiz: maydon nomlari ma'lum to'plamdan, qolgani id.
   if (data.startsWith('menu_field_')) {
-    const parts = data.replace('menu_field_', '').split('_');
-    const id = parts.pop();
-    const field = parts.join('_');
+    const rest = data.slice('menu_field_'.length);
+    const KNOWN_FIELDS = ['name_uz','name_en','name_ru','desc_uz','desc_en','desc_ru','price','image','badge','weight','spicy'];
+    const field = KNOWN_FIELDS.find(f => rest.startsWith(f + '_'));
+    if (!field) return;
+    const id = rest.slice(field.length + 1);
     ctx.session.editField = field;
     ctx.session.editItemId = id;
 
@@ -248,16 +303,16 @@ async function handlePhotoInput(ctx) {
 
   const fileId = photo[photo.length - 1].file_id;
   try {
-    // Telegram file_id ni URL ga aylantirish
-    const file = await ctx.telegram.getFile(fileId);
-    const imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-    await updateMenuItem(id, { image_url: imageUrl });
+    // Telegram rasmini doimiy Supabase Storage URL ga aylantirish
+    // (Telegram URL ~1 soatda eskiradi va BOT_TOKEN ni oshkor qiladi)
+    const { url } = await uploadTelegramPhotoToStorage(ctx, fileId);
+    await updateMenuItem(id, { image_url: url });
     ctx.session.awaitingField = null;
     ctx.session.editItemId = null;
-    await ctx.reply('✅ Rasm yangilandi!');
+    await ctx.reply('✅ Rasm yangilandi! (Supabase Storage ga doimiy saqlandi)');
     return true;
   } catch (err) {
-    ctx.reply(`❌ Xatolik: ${err.message}`);
+    ctx.reply(`❌ Rasmni saqlashda xatolik: ${err.message}`);
     return true;
   }
 }
@@ -361,9 +416,12 @@ const addMenuItemScene = new Scenes.WizardScene(
       const photo = ctx.message.photo;
       const fileId = photo[photo.length - 1].file_id;
       try {
-        const file = await ctx.telegram.getFile(fileId);
-        imageUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-      } catch {}
+        // Doimiy Supabase Storage URL (Telegram URL eskiradi + tokenni oshkor qiladi)
+        const { url } = await uploadTelegramPhotoToStorage(ctx, fileId);
+        imageUrl = url;
+      } catch (err) {
+        await ctx.reply(`⚠️ Rasmni saqlashda muammo: ${err.message}\nRasmsiz davom etamiz.`);
+      }
     }
     ctx.wizard.state.item.image_url = imageUrl;
     await ctx.reply(
@@ -378,15 +436,17 @@ const addMenuItemScene = new Scenes.WizardScene(
     const badge = ctx.message.text === '—' ? '' : ctx.message.text;
     ctx.wizard.state.item.badge = badge;
     ctx.wizard.state.item.is_available = true;
+    // Kategoriya nomini o'chirishdan OLDIN saqlab olamiz (xabarda ishlatamiz)
+    const catName = ctx.wizard.state.item.cat_name || '—';
     delete ctx.wizard.state.item.cat_name; // Supabase'ga yubormaslik uchun
 
     try {
       const item = await addMenuItem(ctx.wizard.state.item);
       await ctx.reply(
         `✅ <b>Taom qo'shildi!</b>\n\n` +
-        `🍔 ${item.name_uz}\n` +
+        `🍔 ${escapeHtml(item.name_uz)}\n` +
         `💰 ${item.price.toLocaleString()} UZS\n` +
-        `📁 Kategoriya: ${ctx.wizard.state.item.cat_name}`,
+        `📁 Kategoriya: ${escapeHtml(catName)}`,
         { parse_mode: 'HTML', ...require('../start').getKeyboard(ctx.userRole || 'admin') }
       );
     } catch (err) {
