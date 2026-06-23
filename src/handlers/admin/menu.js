@@ -378,6 +378,7 @@ const addMenuItemScene = new Scenes.WizardScene(
     const badge = ctx.message.text === '—' ? '' : ctx.message.text;
     ctx.wizard.state.item.badge = badge;
     ctx.wizard.state.item.is_available = true;
+    delete ctx.wizard.state.item.cat_name; // Supabase'ga yubormaslik uchun
 
     try {
       const item = await addMenuItem(ctx.wizard.state.item);
