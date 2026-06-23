@@ -285,3 +285,84 @@ $$ LANGUAGE sql SECURITY DEFINER;
 --           eskiradi va BOT_TOKEN ni oshkor qiladi. Shu sabab bot rasmni yuklab
 --           olib, menu-images bucketiga joylaydi va doimiy public URL saqlaydi.
 -- =============================================
+
+
+-- =============================================
+-- 10. KOMBO / SET MENYULAR (bot orqali boshqariladi)
+-- =============================================
+CREATE TABLE IF NOT EXISTS combos (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name_uz TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  name_ru TEXT NOT NULL,
+  description_uz TEXT DEFAULT '',
+  description_en TEXT DEFAULT '',
+  description_ru TEXT DEFAULT '',
+  price INTEGER NOT NULL DEFAULT 0,          -- kombo uchun belgilangan yagona narx (UZS)
+  image_url TEXT DEFAULT '',
+  is_available BOOLEAN DEFAULT true,
+  badge TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Kombo tarkibidagi taomlar (combo → menu_item, miqdori bilan)
+CREATE TABLE IF NOT EXISTS combo_items (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  combo_id UUID REFERENCES combos(id) ON DELETE CASCADE,
+  menu_item_id UUID REFERENCES menu_items(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS combo_items_combo_idx ON combo_items (combo_id);
+
+-- =============================================
+-- 11. MAHSULOT SOZLAMALARI / MODIFIKATORLAR (step-by-step)
+--     Masalan: "Hajmi" (single, required), "Qo'shimchalar" (multi)
+-- =============================================
+CREATE TABLE IF NOT EXISTS menu_item_options (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  menu_item_id UUID REFERENCES menu_items(id) ON DELETE CASCADE,
+  name_uz TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  name_ru TEXT NOT NULL,
+  type TEXT NOT NULL DEFAULT 'single' CHECK (type IN ('single','multi')),
+  required BOOLEAN DEFAULT false,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS menu_item_options_item_idx ON menu_item_options (menu_item_id);
+
+-- Variant tanlovlari (har bir guruh uchun) — narxga qo'shimcha (price_delta)
+CREATE TABLE IF NOT EXISTS menu_item_option_choices (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  option_id UUID REFERENCES menu_item_options(id) ON DELETE CASCADE,
+  name_uz TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  name_ru TEXT NOT NULL,
+  price_delta INTEGER NOT NULL DEFAULT 0,    -- narxga qo'shiladi (manfiy ham bo'lishi mumkin)
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS option_choices_option_idx ON menu_item_option_choices (option_id);
+
+-- RLS — kombo va sozlamalar (menu_items kabi: hammaga o'qish, faqat service_role yozish)
+ALTER TABLE combos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE combo_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_item_options ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_item_option_choices ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "combos_read" ON combos FOR SELECT USING (true);
+CREATE POLICY "combos_write" ON combos FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "combo_items_read" ON combo_items FOR SELECT USING (true);
+CREATE POLICY "combo_items_write" ON combo_items FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "mi_options_read" ON menu_item_options FOR SELECT USING (true);
+CREATE POLICY "mi_options_write" ON menu_item_options FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "mi_choices_read" ON menu_item_option_choices FOR SELECT USING (true);
+CREATE POLICY "mi_choices_write" ON menu_item_option_choices FOR ALL USING (auth.role() = 'service_role');
+
+-- updated_at trigger (combos)
+CREATE TRIGGER combos_updated_at
+  BEFORE UPDATE ON combos
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();

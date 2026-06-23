@@ -321,11 +321,115 @@ async function deletePushSubscription(id) {
   await supabase.from('push_subscriptions').delete().eq('id', id);
 }
 
+// ─── KOMBO / SET MENYULAR ────────────────────────────
+async function getCombos() {
+  const { data, error } = await supabase
+    .from('combos')
+    .select('*, combo_items(id, quantity, sort_order, menu_item_id, menu_items(name_uz))')
+    .order('sort_order');
+  if (error) throw error;
+  return data;
+}
+
+async function getCombo(id) {
+  const { data, error } = await supabase
+    .from('combos')
+    .select('*, combo_items(id, quantity, sort_order, menu_item_id, menu_items(name_uz))')
+    .eq('id', id).single();
+  if (error) return null;
+  return data;
+}
+
+async function addCombo(combo) {
+  const { data, error } = await supabase
+    .from('combos').insert(combo).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateCombo(id, updates) {
+  const { data, error } = await supabase
+    .from('combos').update(updates).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteCombo(id) {
+  const { error } = await supabase.from('combos').delete().eq('id', id);
+  if (error) throw error;
+}
+
+async function toggleCombo(id, isAvailable) {
+  const { error } = await supabase
+    .from('combos').update({ is_available: isAvailable }).eq('id', id);
+  if (error) throw error;
+}
+
+async function addComboItem(comboId, menuItemId, quantity = 1) {
+  const { error } = await supabase
+    .from('combo_items')
+    .insert({ combo_id: comboId, menu_item_id: menuItemId, quantity });
+  if (error) throw error;
+}
+
+async function deleteComboItem(id) {
+  const { error } = await supabase.from('combo_items').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─── MAHSULOT SOZLAMALARI (modifikatorlar) ───────────
+async function getItemOptions(menuItemId) {
+  const { data, error } = await supabase
+    .from('menu_item_options')
+    .select('*, choices:menu_item_option_choices(*)')
+    .eq('menu_item_id', menuItemId)
+    .order('sort_order');
+  if (error) throw error;
+  return data;
+}
+
+async function getOption(id) {
+  const { data, error } = await supabase
+    .from('menu_item_options')
+    .select('*, choices:menu_item_option_choices(*)')
+    .eq('id', id).single();
+  if (error) return null;
+  return data;
+}
+
+async function addOption(option) {
+  const { data, error } = await supabase
+    .from('menu_item_options').insert(option).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteOption(id) {
+  const { error } = await supabase.from('menu_item_options').delete().eq('id', id);
+  if (error) throw error;
+}
+
+async function addOptionChoice(choice) {
+  const { data, error } = await supabase
+    .from('menu_item_option_choices').insert(choice).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteOptionChoice(id) {
+  const { error } = await supabase.from('menu_item_option_choices').delete().eq('id', id);
+  if (error) throw error;
+}
+
 module.exports = {
   supabase,
   // Menyu
   getCategories, addCategory, deleteCategory,
   getMenuItems, getMenuItem, addMenuItem, updateMenuItem, deleteMenuItem, toggleMenuItem,
+  // Kombolar
+  getCombos, getCombo, addCombo, updateCombo, deleteCombo, toggleCombo, addComboItem, deleteComboItem,
+  // Mahsulot sozlamalari (optionlar)
+  getItemOptions, getOption, addOption, deleteOption, addOptionChoice, deleteOptionChoice,
   // Buyurtmalar
   getOrder, getOrderByNumber, updateOrderStatus, getPendingOrders, getOrders,
   // Sozlamalar

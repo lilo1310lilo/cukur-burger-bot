@@ -5,6 +5,8 @@ const { OWNER_ID } = require('./config');
 const { startHandler } = require('./handlers/start');
 const { ownerHandler } = require('./handlers/owner');
 const { menuHandler, menuScenes } = require('./handlers/admin/menu');
+const { combosHandler, comboScenes } = require('./handlers/admin/combos');
+const { optionsHandler, optionScenes } = require('./handlers/admin/options');
 const { settingsHandler, settingsScenes } = require('./handlers/admin/settings');
 const { statsHandler } = require('./handlers/admin/stats');
 const { couponsHandler, couponScenes } = require('./handlers/admin/coupons');
@@ -27,6 +29,8 @@ bot.use(session({ store: supabaseSessionStore }));
 // Barcha scenalarni birlashtirish
 const stage = new Scenes.Stage([
   ...menuScenes,
+  ...comboScenes,
+  ...optionScenes,
   ...settingsScenes,
   ...scheduleScenes,
   ...couponScenes,
@@ -48,6 +52,7 @@ bot.command('listusers', checkRole(['owner', 'admin', 'manager']), ownerHandler.
 bot.hears('📋 Menyu', checkRole(['owner', 'admin']), menuHandler.showMenu);
 bot.hears('➕ Taom qo\'shish', checkRole(['owner', 'admin']), menuHandler.startAddItem);
 bot.hears('🗂 Kategoriyalar', checkRole(['owner', 'admin']), menuHandler.showCategories);
+bot.hears('🍱 Kombolar', checkRole(['owner', 'admin']), combosHandler.showCombos);
 bot.hears('⚙️ Sozlamalar', checkRole(['owner', 'admin']), settingsHandler.showSettings);
 bot.hears('🎟 Kuponlar', checkRole(['owner', 'admin']), couponsHandler.showCoupons);
 bot.hears('📊 Statistika', checkRole(['owner', 'admin']), statsHandler.showStats);
@@ -72,6 +77,14 @@ bot.on('callback_query', async (ctx) => {
     // Menyu callback lari
     if (data.startsWith('menu_') || data.startsWith('cat_')) {
       return await menuHandler.handleCallback(ctx);
+    }
+    // Kombo callback lari
+    if (data.startsWith('combo_')) {
+      return await combosHandler.handleCallback(ctx);
+    }
+    // Option (modifikator) callback lari
+    if (data.startsWith('opt_')) {
+      return await optionsHandler.handleCallback(ctx);
     }
     // Jadval callback lari
     if (data.startsWith('sched_')) {
@@ -102,6 +115,8 @@ bot.on('text', async (ctx, next) => {
   try {
     // Menu text input tekshirish
     if (await menuHandler.handleTextInput(ctx)) return;
+    // Kombo text input tekshirish
+    if (await combosHandler.handleTextInput(ctx)) return;
     // Settings text input tekshirish
     if (await settingsHandler.handleTextInput(ctx)) return;
     // Schedule text input tekshirish
@@ -120,6 +135,7 @@ bot.on('photo', async (ctx, next) => {
   if (ctx.scene?.current) return next();
   try {
     if (await menuHandler.handlePhotoInput(ctx)) return;
+    if (await combosHandler.handlePhotoInput(ctx)) return;
   } catch (err) {
     console.error('❌ Photo handler xatosi:', err.message);
     try { await ctx.reply(`❌ Rasmni qayta ishlashda xatolik: ${err.message}`); } catch {}

@@ -66,7 +66,24 @@ function buildOrderCard(o) {
   (o.items || []).forEach(it => {
     const name = it.name_uz || it.menuItem?.name_uz || it.name || '—';
     const price = it.price || it.menuItem?.price || 0;
-    text += `• ${it.quantity || 1}x ${escapeHtml(name)} — ${(price * (it.quantity || 1)).toLocaleString()} UZS\n`;
+    const comboMark = it.combo ? '🍱 ' : '';
+    text += `• ${comboMark}${it.quantity || 1}x ${escapeHtml(name)} — ${(price * (it.quantity || 1)).toLocaleString()} UZS\n`;
+    // Kombo tarkibi
+    if (it.combo && Array.isArray(it.combo_items) && it.combo_items.length) {
+      const inside = it.combo_items
+        .map(ci => `${ci.quantity || 1}x ${ci.name_uz || ci.name_en || ci.name_ru || '—'}`)
+        .join(', ');
+      text += `   <i>↳ ${escapeHtml(inside)}</i>\n`;
+    }
+    // Tanlangan optionlar
+    if (Array.isArray(it.options) && it.options.length) {
+      it.options.forEach(op => {
+        const grp = op.group_uz || op.group_en || op.group_ru || '';
+        const ch = op.choice_uz || op.choice_en || op.choice_ru || '';
+        const dp = op.price_delta ? ` (${op.price_delta > 0 ? '+' : ''}${Number(op.price_delta).toLocaleString()})` : '';
+        text += `   <i>↳ ${escapeHtml(grp)}: ${escapeHtml(ch)}${dp}</i>\n`;
+      });
+    }
   });
 
   if (o.delivery_fee > 0) {

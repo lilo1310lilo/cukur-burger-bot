@@ -7,9 +7,10 @@ function getKeyboard(role) {
   if (role === 'owner' || role === 'admin') {
     return Markup.keyboard([
       ['📋 Menyu', '🗂 Kategoriyalar'],
-      ['⚙️ Sozlamalar', '🎟 Kuponlar'],
-      ['📊 Statistika', '📦 Buyurtmalar'],
-      ['🕐 Ish vaqti', '👥 Foydalanuvchilar'],
+      ['🍱 Kombolar', '⚙️ Sozlamalar'],
+      ['🎟 Kuponlar', '📊 Statistika'],
+      ['📦 Buyurtmalar', '🕐 Ish vaqti'],
+      ['👥 Foydalanuvchilar'],
     ]).resize();
   }
   if (role === 'manager') {

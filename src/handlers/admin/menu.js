@@ -100,6 +100,7 @@ async function handleCallback(ctx) {
       [Markup.button.callback('⚖️ Og\'irligi', `menu_field_weight_${id}`)],
       [Markup.button.callback('🌶 Achchiqlik darajasi', `menu_field_spicy_${id}`)],
       [Markup.button.callback('🥗 Dietik teglar', `menu_diet_${id}`)],
+      [Markup.button.callback('🧩 Sozlamalar (optionlar)', `opt_groups_${id}`)],
       [Markup.button.callback('❌ Bekor qilish', 'menu_cancel')],
     ];
 
