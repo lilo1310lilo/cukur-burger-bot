@@ -1,6 +1,16 @@
 const { Markup } = require('telegraf');
 const { getOrders, getOrder, updateOrderStatus, getSetting } = require('../../db');
 const { STATUS_LABELS } = require('../../config');
+const { escapeHtml } = require('../../utils/escape');
+
+// Rad etish sabablari (callback kalit → ko'rsatiladigan matn)
+const REJECT_REASONS = {
+  chek_soxta: 'Chek soxta',
+  chek_aniq_emas: 'Chek o\'qib bo\'lmaydi',
+  summa_mos_emas: 'Summa mos emas',
+  kafe_yopiq: 'Kafe yopiq',
+  boshqa: 'Boshqa sabab',
+};
 
 // ─── FAOL BUYURTMALAR RO'YXATI ────────────────────────
 async function showActiveOrders(ctx) {
@@ -21,7 +31,7 @@ async function showActiveOrders(ctx) {
     active.forEach(o => {
       const status = STATUS_LABELS[o.status] || o.status;
       const type = o.delivery_type === 'delivery' ? '🚴' : '🏃';
-      text += `#${o.order_number} ${type} <b>${o.customer_name}</b> — ${o.total_price.toLocaleString()} UZS\n`;
+      text += `#${o.order_number} ${type} <b>${escapeHtml(o.customer_name)}</b> — ${o.total_price.toLocaleString()} UZS\n`;
       text += `   ${status}\n\n`;
       buttons.push([Markup.button.callback(
         `#${o.order_number} — ${o.customer_name}`,
@@ -44,27 +54,47 @@ function buildOrderCard(o) {
   let text = `🧾 <b>Buyurtma #${o.order_number}</b>\n`;
   text += `📅 ${date}\n`;
   text += `━━━━━━━━━━━━━━━━━━━━\n`;
-  text += `👤 <b>${o.customer_name}</b>\n`;
-  text += `📞 <a href="tel:${o.customer_phone}">${o.customer_phone}</a>\n`;
+  text += `👤 <b>${escapeHtml(o.customer_name)}</b>\n`;
+  text += `📞 <a href="tel:${escapeHtml(o.customer_phone)}">${escapeHtml(o.customer_phone)}</a>\n`;
   text += `📦 ${type}\n`;
 
   if (o.delivery_type === 'delivery' && o.address) {
-    text += `📍 ${o.address}\n`;
+    text += `📍 ${escapeHtml(o.address)}\n`;
   }
 
   text += `\n🛒 <b>Buyurtma:</b>\n`;
   (o.items || []).forEach(it => {
     const name = it.name_uz || it.menuItem?.name_uz || it.name || '—';
     const price = it.price || it.menuItem?.price || 0;
-    text += `• ${it.quantity || 1}x ${name} — ${(price * (it.quantity || 1)).toLocaleString()} UZS\n`;
+    const comboMark = it.combo ? '🍱 ' : '';
+    text += `• ${comboMark}${it.quantity || 1}x ${escapeHtml(name)} — ${(price * (it.quantity || 1)).toLocaleString()} UZS\n`;
+    // Kombo tarkibi
+    if (it.combo && Array.isArray(it.combo_items) && it.combo_items.length) {
+      const inside = it.combo_items
+        .map(ci => `${ci.quantity || 1}x ${ci.name_uz || ci.name_en || ci.name_ru || '—'}`)
+        .join(', ');
+      text += `   <i>↳ ${escapeHtml(inside)}</i>\n`;
+    }
+    // Tanlangan optionlar
+    if (Array.isArray(it.options) && it.options.length) {
+      it.options.forEach(op => {
+        const grp = op.group_uz || op.group_en || op.group_ru || '';
+        const ch = op.choice_uz || op.choice_en || op.choice_ru || '';
+        const dp = op.price_delta ? ` (${op.price_delta > 0 ? '+' : ''}${Number(op.price_delta).toLocaleString()})` : '';
+        text += `   <i>↳ ${escapeHtml(grp)}: ${escapeHtml(ch)}${dp}</i>\n`;
+      });
+    }
   });
 
   if (o.delivery_fee > 0) {
     text += `\n🚴 Yetkazish: ${o.delivery_fee.toLocaleString()} UZS\n`;
   }
+  if (o.discount > 0) {
+    text += `🎟 Chegirma${o.coupon_code ? ` (${escapeHtml(o.coupon_code)})` : ''}: −${o.discount.toLocaleString()} UZS\n`;
+  }
   text += `💰 <b>Jami: ${o.total_price.toLocaleString()} UZS</b>\n`;
 
-  if (o.notes) text += `\n📝 Izoh: ${o.notes}\n`;
+  if (o.notes) text += `\n📝 Izoh: ${escapeHtml(o.notes)}\n`;
 
   text += `\n📊 Status: ${status}`;
   return text;
@@ -137,30 +167,33 @@ async function handleCallback(ctx) {
   }
 
   // Rad etish — sabab so'rash
-  if (data.startsWith('order_reject_')) {
-    const id = data.replace('order_reject_', '');
+  if (data.startsWith('order_reject_') && !data.startsWith('order_reject_reason_')) {
+    const id = data.slice('order_reject_'.length);
     ctx.session.rejectOrderId = id;
     return ctx.editMessageText(
       '❌ <b>Rad etish sababi:</b>',
       { parse_mode: 'HTML', ...Markup.inlineKeyboard([
-        [Markup.button.callback('💳 Chek soxta', `order_reject_reason_${id}_chek_soxta`)],
-        [Markup.button.callback('🔍 Chek o\'qib bo\'lmaydi', `order_reject_reason_${id}_chek_aniq_emas`)],
-        [Markup.button.callback('💰 Summa mos emas', `order_reject_reason_${id}_summa_mos_emas`)],
-        [Markup.button.callback('⏰ Kafe yopiq', `order_reject_reason_${id}_kafe_yopiq`)],
-        [Markup.button.callback('❌ Boshqa sabab', `order_reject_reason_${id}_boshqa`)],
+        [Markup.button.callback('💳 Chek soxta', `order_reject_reason_chek_soxta_${id}`)],
+        [Markup.button.callback('🔍 Chek o\'qib bo\'lmaydi', `order_reject_reason_chek_aniq_emas_${id}`)],
+        [Markup.button.callback('💰 Summa mos emas', `order_reject_reason_summa_mos_emas_${id}`)],
+        [Markup.button.callback('⏰ Kafe yopiq', `order_reject_reason_kafe_yopiq_${id}`)],
+        [Markup.button.callback('❌ Boshqa sabab', `order_reject_reason_boshqa_${id}`)],
         [Markup.button.callback('⬅️ Bekor', `order_view_${id}`)],
       ])}
     );
   }
 
   if (data.startsWith('order_reject_reason_')) {
-    const parts = data.replace('order_reject_reason_', '').split('_');
-    const id = parts[0];
-    const reason = parts.slice(1).join(' ');
+    const rest = data.slice('order_reject_reason_'.length);
+    // Ma'lum sabab kalitini boshidan aniqlaymiz, qolgani — UUID id.
+    const reasonKey = Object.keys(REJECT_REASONS).find(k => rest.startsWith(k + '_'));
+    if (!reasonKey) return;
+    const id = rest.slice(reasonKey.length + 1);
+    const reason = REJECT_REASONS[reasonKey];
     await updateOrderStatus(id, 'rejected', { cancel_reason: reason, cancelled_by: 'manager' });
     const order = await getOrder(id);
     await ctx.editMessageText(
-      `❌ Buyurtma #${order.order_number} rad etildi.\nSabab: ${reason}\n\n` + buildOrderCard(order),
+      `❌ Buyurtma #${order.order_number} rad etildi.\nSabab: ${escapeHtml(reason)}\n\n` + buildOrderCard(order),
       { parse_mode: 'HTML', ...getStatusButtons(order) }
     );
     return;
@@ -218,7 +251,7 @@ async function sendOrderNotification(bot, order, managerId) {
   const text =
     `🔔 <b>YANGI BUYURTMA #${order.order_number}</b>\n\n` +
     buildOrderCard(order) +
-    `\n\n💳 Karta: <code>${cardNum}</code>\nEgasi: ${cardOwner}`;
+    `\n\n💳 Karta: <code>${escapeHtml(cardNum)}</code>\nEgasi: ${escapeHtml(cardOwner)}`;
 
   const keyboard = Markup.inlineKeyboard([
     [
