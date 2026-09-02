@@ -13,9 +13,9 @@ cp .env.example .env
 ```
 BOT_TOKEN=yangi_bot_tokeningiz
 WEBHOOK_URL=https://sizning-railway-url.up.railway.app
-SUPABASE_URL=https://fkotsvrpekkcelmhhnlc.supabase.co
+SUPABASE_URL=https://yoururlhere.supabase.co
 SUPABASE_SERVICE_KEY=sb_secret_...
-OWNER_ID=1869515752
+OWNER_ID=1234567890
 ```
 
 ## Supabase sozlash
